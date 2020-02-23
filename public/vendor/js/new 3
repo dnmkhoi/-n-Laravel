@@ -1,0 +1,474 @@
+Cách tạo form đăng nhập bằng cách sử dụng table chỉnh sửa
+
+Bước 1 chạy câu lệnh php artisan make:autho
+Bước 2 Không xài route mặc định của laravel chúng ta sử dụng route như sau
+// Auth::routes();
+// Xác thực Routes...
+Route::get('/admin/login', 'Auth\LoginController@showLoginForm')->name('login');
+Route::post('/admin/login', 'Auth\LoginController@login');
+Route::post('/admin/logout', 'Auth\LoginController@logout')->name('logout');
+// Đăng ký Routes...
+Route::get('/admin/register', 'Auth\RegisterController@showRegistrationForm')->name('register');
+Route::post('/admin/register', 'Auth\RegisterController@register');
+// Quên mật khẩu Routes...
+Route::get('/admin/password/reset', 'Auth\ForgotPasswordController@showLinkRequestForm')->name('password.request');
+Route::post('/admin/password/email', 'Auth\ForgotPasswordController@sendResetLinkEmail')->name('password.email');
+Route::get('/admin/password/reset/{token}', 'Auth\ResetPasswordController@showResetForm')->name('password.reset');
+Route::post('/admin/password/reset', 'Auth\ResetPasswordController@reset');
+Route::get('/home', 'HomeController@index')->name('home');
+Bước 3: Sửa file config/auth
+    'providers' => [
+        // Không sử dụng model `User` (mặc định của Laravel)
+        // 'users' => [
+        //     'driver' => 'eloquent',
+        //     'model' => App\User::class,
+        // ],
+        // Thay thế việc Xác thực tài khoản bằng model `Nhanvien`
+        'users' => [
+            'driver' => 'custom',
+            'model' => App\Nhanvien::class,
+        ],
+        // 'users' => [
+        //     'driver' => 'database',
+        //     'table' => 'users',
+        // ],
+    ],
+Bước 4 Sửa trong model Nhanvien (model nào muốn truy xuất để đăng nhập) thêm implements AuthenticatableContract
+class Nhanvien extends Model implements AuthenticatableContract
+Bước 5 thư mục Provider/AuthServiceProvider ở function boot thêm câu lệnh  để băm password   
+	$this->app->auth->provider('custom', function($app, array $config){
+            return new CustomUserProvider($app['hash'], $config['model']);
+        });
+Bước 6: Trong thư mục controller thêm file CustomUserProvider
+<?php
+
+namespace App\Auth;
+
+use Illuminate\Support\Str;
+use Illuminate\Auth\EloquentUserProvider;
+use Illuminate\Contracts\Auth\UserProvider as UserProviderContract;
+use Illuminate\Contracts\Auth\Authenticatable as UserContract;
+
+class CustomUserProvider extends EloquentUserProvider implements UserProviderContract
+{
+    /**
+     * Retrieve a user by their unique identifier.
+     *
+     * @param  mixed  $identifier
+     * @return \Illuminate\Contracts\Auth\Authenticatable|null
+     */
+    public function retrieveById($identifier)
+    {
+        $model = $this->createModel();
+
+        return $model->newQuery()
+            ->where($model->getAuthIdentifierName(), $identifier)
+            ->first();
+    }
+
+    /**
+     * Retrieve a user by their unique identifier and "remember me" token.
+     *
+     * @param  mixed  $identifier
+     * @param  string  $token
+     * @return \Illuminate\Contracts\Auth\Authenticatable|null
+     */
+    public function retrieveByToken($identifier, $token)
+    {
+        $model = $this->createModel();
+
+        $model = $model->where($model->getAuthIdentifierName(), $identifier)->first();
+
+        if (! $model) {
+            return null;
+        }
+
+        $rememberToken = $model->getRememberToken();
+
+        return $rememberToken && hash_equals($rememberToken, $token) ? $model : null;
+    }
+
+    /**
+     * Update the "remember me" token for the given user in storage.
+     *
+     * @param  \Illuminate\Contracts\Auth\Authenticatable  $user
+     * @param  string  $token
+     * @return void
+     */
+    public function updateRememberToken(UserContract $user, $token)
+    {
+        $user->setRememberToken($token);
+
+        $timestamps = $user->timestamps;
+
+        $user->timestamps = false;
+
+        $user->save();
+
+        $user->timestamps = $timestamps;
+    }
+
+    /**
+     * Retrieve a user by the given credentials.
+     *
+     * @param  array  $credentials
+     * @return \Illuminate\Contracts\Auth\Authenticatable|null
+     */
+    public function retrieveByCredentials(array $credentials)
+    {
+        if (empty($credentials) ||
+           (count($credentials) === 1 &&
+            array_key_exists('nv_matKhau', $credentials))) {
+            return;
+        }
+
+        // First we will add each credential element to the query as a where clause.
+        // Then we can execute the query and, if we found a user, return it in a
+        // Eloquent User "model" that will be utilized by the Guard instances.
+        $query = $this->createModel()->newQuery();
+
+
+        foreach ($credentials as $key => $value) {
+            if (! Str::contains($key, 'nv_matKhau')) {
+                $query->where($key, $value);
+            }
+        }
+
+        return $query->first();
+    }
+
+    /**
+     * Validate a user against the given credentials.
+     *
+     * @param  \Illuminate\Contracts\Auth\Authenticatable  $user
+     * @param  array  $credentials
+     * @return bool
+     */
+    public function validateCredentials(UserContract $user, array $credentials)
+    {
+        $plain = $credentials['nv_matKhau'];
+
+        return $this->hasher->check($plain, $user->getAuthPassword());
+    }
+}
+Bước 7: Sửa file view/auth/login và resiter nhu file
+// Login
+<?php
+namespace App\Http\Controllers\Auth;
+use App\Http\Controllers\Controller;
+use Illuminate\Foundation\Auth\AuthenticatesUsers;
+use Illuminate\Http\Request;
+class LoginController extends Controller
+{
+    /*
+    |--------------------------------------------------------------------------
+    | Login Controller
+    |--------------------------------------------------------------------------
+    |
+    | This controller handles authenticating users for the application and
+    | redirecting them to your home screen. The controller uses a trait
+    | to conveniently provide its functionality to your applications.
+    |
+    */
+    use AuthenticatesUsers;
+    /**
+     * Where to redirect users after login.
+     *
+     * @var string
+     */
+    protected $redirectTo = '/admin'; //Sau khi đăng nhập thành công, sẽ tự động trỏ về trang /admin/
+    /**
+     * Create a new controller instance.
+     *
+     * @return void
+     */
+    public function __construct()
+    {
+        $this->middleware('guest')->except('logout');
+    }
+    /**
+     * Hàm trả về tên cột dùng để tìm `Tên đăng nhập`.
+     * Thông thường là cột `username` hoặc cột `email`
+     */
+    public function username(){
+        return 'nv_taiKhoan';
+    }
+    /**
+     * Get the needed authorization credentials from the request.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return array
+     */
+    protected function credentials(Request $request)
+    {
+        $cred = $request->only($this->username(), 'nv_matKhau');
+        return $cred;
+    }
+    /**
+     * Hàm dùng để Kiểm tra tính hợp lệ của dữ liệu (VALIDATE) khi Xác thực tài khoản
+     */
+    protected function validateLogin(Request $request)
+    {
+        $this->validate($request, [
+            $this->username() => 'required|string', // tên tài khoản bắt buộc nhập
+            'nv_matKhau' => 'required|string',      // mật khẩu bắt buộc nhập
+        ]);
+    }
+    /**
+     * Attempt to log the user into the application.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return bool
+     */
+    protected function attemptLogin(Request $request)
+    {
+        $a = $this->guard()->attempt(
+            $this->credentials($request), $request->filled('remember')
+        );
+    }
+}
+// Register
+<?php
+namespace App\Http\Controllers\Auth;
+use App\Nhanvien;
+use App\Http\Controllers\Controller;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Foundation\Auth\RegistersUsers;
+use Carbon\Carbon;
+class RegisterController extends Controller
+{
+    /*
+    |--------------------------------------------------------------------------
+    | Register Controller
+    |--------------------------------------------------------------------------
+    |
+    | This controller handles the registration of new users as well as their
+    | validation and creation. By default this controller uses a trait to
+    | provide this functionality without requiring any additional code.
+    |
+    */
+    use RegistersUsers;
+    /**
+     * Where to redirect users after registration.
+     *
+     * @var string
+     */
+    protected $redirectTo = '/admin';
+    /**
+     * Create a new controller instance.
+     *
+     * @return void
+     */
+    public function __construct()
+    {
+        $this->middleware('guest');
+    }
+    /**
+     * Get a validator for an incoming registration request.
+     *
+     * @param  array  $data
+     * @return \Illuminate\Contracts\Validation\Validator
+     */
+    protected function validator(array $data)
+    {
+        return Validator::make($data, [
+            'nv_taiKhoan' => 'required|string|max:50|unique:nhanvien',
+            'nv_matKhau' => 'required|string|min:6|confirmed',
+            'nv_hoTen' => 'required|string|max:100',
+            'nv_gioiTinh' => 'required',
+            'nv_email' => 'required|string|email|max:100',
+            'nv_ngaySinh' => 'required',
+            'nv_diaChi' => 'required',
+            'nv_dienThoai' => 'required'
+        ]);
+    }
+    /**
+     * Create a new user instance after a valid registration.
+     *
+     * @param  array  $data
+     * @return \App\Nhanvien
+     */
+    protected function create(array $data)
+    {
+        return Nhanvien::create([
+            'nv_taiKhoan' => $data['nv_taiKhoan'],
+            'nv_matKhau' => bcrypt($data['nv_matKhau']),
+            'nv_hoTen' => $data['nv_hoTen'],
+            'nv_gioiTinh' => $data['nv_gioiTinh'],
+            'nv_email' => $data['nv_email'],
+            'nv_ngaySinh' => $data['nv_ngaySinh'],
+            'nv_diaChi' => $data['nv_diaChi'],
+            'nv_dienThoai' => $data['nv_dienThoai'],
+            'nv_taoMoi' => Carbon::now(), // Lấy ngày giờ hiện tại (sử dụng Carbon)
+            'nv_capNhat' => Carbon::now(), // Lấy ngày giờ hiện tại (sử dụng Carbon)
+            'nv_trangThai' => 2, // Mặc định là 2-Khả dụng
+            'q_ma' => 2, // Mặc định là 2-Quản trị
+        ]);
+    }
+}
+Bước 8: vendor/laravel/framework/src/illuminate/Auth/EloquentUserProvider chỉnh sửa file thành<?php
+namespace Illuminate\Auth;
+use Illuminate\Support\Str;
+use Illuminate\Contracts\Auth\UserProvider;
+use Illuminate\Contracts\Hashing\Hasher as HasherContract;
+use Illuminate\Contracts\Auth\Authenticatable as UserContract;
+class EloquentUserProvider implements UserProvider
+{
+    /**
+     * The hasher implementation.
+     *
+     * @var \Illuminate\Contracts\Hashing\Hasher
+     */
+    protected $hasher;
+    /**
+     * The Eloquent user model.
+     *
+     * @var string
+     */
+    protected $model;
+    /**
+     * Create a new database user provider.
+     *
+     * @param  \Illuminate\Contracts\Hashing\Hasher  $hasher
+     * @param  string  $model
+     * @return void
+     */
+    public function __construct(HasherContract $hasher, $model)
+    {
+        $this->model = $model;
+        $this->hasher = $hasher;
+    }
+    /**
+     * Retrieve a user by their unique identifier.
+     *
+     * @param  mixed  $identifier
+     * @return \Illuminate\Contracts\Auth\Authenticatable|null
+     */
+    public function retrieveById($identifier)
+    {
+        $model = $this->createModel();
+        return $model->newQuery()
+            ->where($model->getAuthIdentifierName(), $identifier)
+            ->first();
+    }
+    /**
+     * Retrieve a user by their unique identifier and "remember me" token.
+     *
+     * @param  mixed  $identifier
+     * @param  string  $token
+     * @return \Illuminate\Contracts\Auth\Authenticatable|null
+     */
+    public function retrieveByToken($identifier, $token)
+    {
+        $model = $this->createModel();
+        $model = $model->where($model->getAuthIdentifierName(), $identifier)->first();
+        if (! $model) {
+            return null;
+        }
+        $rememberToken = $model->getRememberToken();
+        return $rememberToken && hash_equals($rememberToken, $token) ? $model : null;
+    }
+    /**
+     * Update the "remember me" token for the given user in storage.
+     *
+     * @param  \Illuminate\Contracts\Auth\Authenticatable  $user
+     * @param  string  $token
+     * @return void
+     */
+    public function updateRememberToken(UserContract $user, $token)
+    {
+        $user->setRememberToken($token);
+        $timestamps = $user->timestamps;
+        $user->timestamps = false;
+        $user->save();
+        $user->timestamps = $timestamps;
+    }
+    /**
+     * Retrieve a user by the given credentials.
+     *
+     * @param  array  $credentials
+     * @return \Illuminate\Contracts\Auth\Authenticatable|null
+     */
+    public function retrieveByCredentials(array $credentials)
+    {
+        if (empty($credentials) ||
+           (count($credentials) === 1 &&
+            array_key_exists('password', $credentials))) {
+            return;
+        }
+
+        // First we will add each credential element to the query as a where clause.
+        // Then we can execute the query and, if we found a user, return it in a
+        // Eloquent User "model" that will be utilized by the Guard instances.
+        $query = $this->createModel()->newQuery();
+
+        foreach ($credentials as $key => $value) {
+            if (! Str::contains($key, 'password')) {
+                $query->where($key, $value);
+            }
+        }
+        return $query->first();
+    }
+    /**
+     * Validate a user against the given credentials.
+     *
+     * @param  \Illuminate\Contracts\Auth\Authenticatable  $user
+     * @param  array  $credentials
+     * @return bool
+     */
+    public function validateCredentials(UserContract $user, array $credentials)
+    {
+        $plain = $credentials['password'];
+        return $this->hasher->check($plain, $user->getAuthPassword());
+    }
+    /**
+     * Create a new instance of the model.
+     *
+     * @return \Illuminate\Database\Eloquent\Model
+     */
+    public function createModel()
+    {
+        $class = '\\'.ltrim($this->model, '\\');
+        return new $class;
+    }
+    /**
+     * Gets the hasher implementation.
+     *
+     * @return \Illuminate\Contracts\Hashing\Hasher
+     */
+    public function getHasher()
+    {
+        return $this->hasher;
+    }
+    /**
+     * Sets the hasher implementation.
+     *
+     * @param  \Illuminate\Contracts\Hashing\Hasher  $hasher
+     * @return $this
+     */
+    public function setHasher(HasherContract $hasher)
+    {
+        $this->hasher = $hasher;
+        return $this;
+    }
+    /**
+     * Gets the name of the Eloquent user model.
+     *
+     * @return string
+     */
+    public function getModel()
+    {
+        return $this->model;
+    }
+    /**
+     * Sets the name of the Eloquent user model.
+     *
+     * @param  string  $model
+     * @return $this
+     */
+    public function setModel($model)
+    {
+        $this->model = $model;
+        return $this;
+    }
+}
